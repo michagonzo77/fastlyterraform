@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and install Fastly CLI .deb file
-RUN curl -o /tmp/fastly.deb -L https://github.com/fastly/cli/releases/download/v10.9.0/fastly_10.9.0_linux_amd64.deb && \
+RUN curl -o /tmp/fastly.deb -L https://github.com/fastly/cli/releases/download/v10.10.0/fastly_10.10.0_linux_amd64.deb && \
     apt-get install -y /tmp/fastly.deb && \
     rm /tmp/fastly.deb && \
     chmod +x /usr/local/bin/fastly && \
