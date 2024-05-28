@@ -25,3 +25,5 @@ COPY ./requirements.txt /requirements.txt
 RUN /usr/local/bin/pip install --no-cache-dir -r /requirements.txt
 
 USER appuser
+
+WORKDIR /tmp

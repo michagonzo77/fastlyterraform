@@ -17,9 +17,10 @@ TIME_UNITS = ['second', 'seconds', 'minute', 'minutes', 'hour', 'hours', 'day', 
 FUZZY_MATCH_THRESHOLD = 80  # Adjust this threshold based on how strict you want the matching to be
 REAL_TIME_BASE_URL = "https://rt.fastly.com"
 HISTORICAL_BASE_URL = "https://api.fastly.com"
-DEFAULT_STREAM_DURATION = 20  # Default streaming duration in seconds
-DEFAULT_WAIT_INTERVAL = 3  # Default wait interval for real-time streaming
-FASTLY_DASHBOARD_URL = "https://manage.fastly.com/configure/services/{}"
+DEFAULT_STREAM_DURATION = 6  # Default streaming duration in seconds
+DEFAULT_WAIT_INTERVAL = 2  # Default wait interval for real-time streaming
+FASTLY_DASHBOARD_HISTORICAL_URL = "https://manage.fastly.com/observability/dashboard/system/overview/historic/{service_id}?range={range}&region=all"
+FASTLY_DASHBOARD_REALTIME_URL = "https://manage.fastly.com/observability/dashboard/system/overview/realtime/{service_id}?range={range}"
 
 COMMON_FIELDS = ["status_5xx", "requests", "hits", "miss"]
 
@@ -176,7 +177,7 @@ def format_value(value):
 
 def stream_real_time_data(api_token, service_id, duration, wait_interval=DEFAULT_WAIT_INTERVAL):
     print(f"Streaming real-time data for {duration} seconds with a wait interval of {wait_interval} seconds...")
-    print(f"To change the wait interval, provide the interval in seconds as an additional argument.")
+    print(f"To change the wait interval, just let me know the new interval in seconds and I'll adjust it for you.")
     end_time = datetime.utcnow() + timedelta(seconds=duration)
     total_stats = {field: 0 for field in COMMON_FIELDS}
 
@@ -206,6 +207,12 @@ def stream_real_time_data(api_token, service_id, duration, wait_interval=DEFAULT
     for field, value in total_stats.items():
         print(f"{field}: {format_value(value)}")
     print("\n---\n")
+
+def generate_dashboard_url(service_id, range_str, is_realtime=False):
+    if is_realtime:
+        return FASTLY_DASHBOARD_REALTIME_URL.format(service_id=service_id, range=range_str)
+    else:
+        return FASTLY_DASHBOARD_HISTORICAL_URL.format(service_id=service_id, range=range_str)
 
 def main(environment=None, service_name=None, field_name=None, duration=None, realtime=False, stream_duration=DEFAULT_STREAM_DURATION, wait_interval=DEFAULT_WAIT_INTERVAL):
     try:
@@ -244,14 +251,14 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
 
         if realtime:
             stream_real_time_data(API_TOKEN, service_id, stream_duration, wait_interval)
-            print(f"View more details in the Fastly dashboard: {FASTLY_DASHBOARD_URL.format(service_id)}")
+            print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, f'{stream_duration}s', is_realtime=True)}")
             return
 
         if not duration:
             print("No duration specified. Please provide a duration in the format 'X minutes ago', 'X hours ago', etc.")
             return
 
-        start_time, end_time, by = get_time_range(duration)
+        start_time, end_time, by, range_str = get_time_range(duration)
         if start_time is None or end_time is None:
             print("Failed to parse the duration provided.")
             return
@@ -262,7 +269,7 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
         if not stats_data:
             print(f"Unable to retrieve historical data for service '{best_match}', falling back to real-time data.")
             stream_real_time_data(API_TOKEN, service_id, stream_duration, wait_interval)
-            print(f"View more details in the Fastly dashboard: {FASTLY_DASHBOARD_URL.format(service_id)}")
+            print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, f'{stream_duration}s', is_realtime=True)}")
             return
 
         if not field_name or field_name.lower() == "overview":
@@ -272,7 +279,7 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
                 total_value = sum(values)
                 formatted_total_value = format_value(total_value)
                 print(f"{common_field}: {formatted_total_value}")
-            print(f"View more details in the Fastly dashboard: {FASTLY_DASHBOARD_URL.format(service_id)}")
+            print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, range_str, is_realtime=False)}")
             print("You can specify a specific field to get more detailed information.")
             return
 
@@ -304,7 +311,7 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
             for suggestion, score in suggestions:
                 print(f"  - {suggestion.replace(' ', '_')}")
         
-        print(f"View more details in the Fastly dashboard: {FASTLY_DASHBOARD_URL.format(service_id)}")
+        print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, range_str, is_realtime=False)}")
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -328,18 +335,19 @@ def get_time_range(duration):
     duration_parts = parse_duration(duration)
     if not duration_parts or len(duration_parts) < 2:
         print("Invalid duration format. Supported formats: 'X seconds ago', 'X minutes ago', 'X hours ago', 'X days ago', 'X weeks ago', 'X months ago'")
-        return None, None, None
+        return None, None, None, None
 
     try:
         quantity = int(duration_parts[0])
     except ValueError:
         print(f"Invalid quantity '{duration_parts[0]}' in duration. Must be an integer.")
-        return None, None, None
+        return None, None, None, None
 
     unit = process.extractOne(duration_parts[1], TIME_UNITS, scorer=fuzz.ratio)[0]
     start_time = None
     end_time = now.timestamp()
     by = 'minute'
+    range_str = f"{quantity}{unit[0]}" if unit not in ['months', 'month'] else f"{quantity}mo"
 
     if unit in ['second', 'seconds']:
         start_time = (now - timedelta(seconds=quantity)).timestamp()
@@ -360,10 +368,10 @@ def get_time_range(duration):
         by = 'month'
     else:
         print("Invalid unit format. Supported units are 'second(s)', 'minute(s)', 'hour(s)', 'day(s)', 'week(s)', 'month(s)'.")
-        return None, None, None
+        return None, None, None, None
 
     debug_print(f"Calculated start_time: {datetime.fromtimestamp(start_time)}, end_time: {datetime.fromtimestamp(end_time)}, by: {by}")
-    return start_time, end_time, by
+    return start_time, end_time, by, range_str
 
 if __name__ == "__main__":
     args = sys.argv[1:]
