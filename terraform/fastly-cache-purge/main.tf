@@ -33,8 +33,8 @@ The ONLY Options are:
    - `prod-yoga`
 
 2. Ask the user to select *brand*, *platform*, or *operations*.**
-   - If the user selects by *Brand*, list options from the `FASTLY_BRANDS` environment variable in a numbered list.
-   - If the user selects by *Platform*, list options from the `FASTLY_PLATFORMS` environment variable in a numbered list.
+   - If the user selects by *Brand*, list all options from the $FASTLY_BRANDS environment variable in a numbered list.
+   - If the user selects by *Platform*, list all options from the $FASTLY_PLATFORMS environment variable in a numbered list.
    - If the user selects by *Operation*, prompt the user to input the operation
 
 3. Ask the user for confirmation before executing the command
