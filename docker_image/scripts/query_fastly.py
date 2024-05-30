@@ -356,16 +356,16 @@ def get_time_range(duration):
         start_time = (now - timedelta(minutes=quantity)).timestamp()
     elif unit in ['hour', 'hours']:
         start_time = (now - timedelta(hours=quantity)).timestamp()
-        by = 'hour'
+        by = 'minute' if quantity == 1 else 'hour'
     elif unit in ['day', 'days']:
         start_time = (now - timedelta(days=quantity)).timestamp()
-        by = 'day'
+        by = 'hour' if quantity == 1 else 'day'
     elif unit in ['week', 'weeks']:
         start_time = (now - timedelta(weeks=quantity)).timestamp()
-        by = 'week'
+        by = 'day'
     elif unit in ['month', 'months']:
         start_time = (now - timedelta(days=30 * quantity)).timestamp()
-        by = 'month'
+        by = 'day'
     else:
         print("Invalid unit format. Supported units are 'second(s)', 'minute(s)', 'hour(s)', 'day(s)', 'week(s)', 'month(s)'.")
         return None, None, None, None
