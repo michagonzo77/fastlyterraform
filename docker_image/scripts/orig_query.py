@@ -7,14 +7,9 @@ from datetime import datetime, timedelta
 from fuzzywuzzy import process, fuzz
 from pprint import pprint
 import time
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 
 VALID_ENVIRONMENTS = ['production', 'dev', 'qa']
 API_TOKEN = os.getenv("FASTLY_API_TOKEN")  # Replace this with your actual API token
-SLACK_API_TOKEN = os.getenv("SLACK_API_TOKEN")
-SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID")
-SLACK_THREAD_TS = os.getenv("SLACK_THREAD_TS")
 CACHE_FILE = "services_cache.json"
 FIELDS_CACHE_FILE = "fields_cache.json"
 CACHE_EXPIRY_HOURS = 24
@@ -22,12 +17,12 @@ TIME_UNITS = ['second', 'seconds', 'minute', 'minutes', 'hour', 'hours', 'day', 
 FUZZY_MATCH_THRESHOLD = 80  # Adjust this threshold based on how strict you want the matching to be
 REAL_TIME_BASE_URL = "https://rt.fastly.com"
 HISTORICAL_BASE_URL = "https://api.fastly.com"
-DEFAULT_STREAM_DURATION = 60  # Default streaming duration in seconds
+DEFAULT_STREAM_DURATION = 6  # Default streaming duration in seconds
 DEFAULT_WAIT_INTERVAL = 2  # Default wait interval for real-time streaming
 FASTLY_DASHBOARD_HISTORICAL_URL = "https://manage.fastly.com/observability/dashboard/system/overview/historic/{service_id}?range={range}&region=all"
 FASTLY_DASHBOARD_REALTIME_URL = "https://manage.fastly.com/observability/dashboard/system/overview/realtime/{service_id}?range={range}"
 
-COMMON_FIELDS = ["status_5xx", "requests", "hits", "miss", "all_pass_requests"]
+COMMON_FIELDS = ["status_5xx", "requests", "hits", "miss"]
 
 def debug_print(message):
     if os.getenv("KUBIYA_DEBUG"):
@@ -176,39 +171,42 @@ def get_matching_field(field_name, stats_data):
     return original_fields.get(best_match[0].replace(' ', '_').replace('-', '_')), processed_fields
 
 def format_value(value):
-    try:
-        value = float(value)  # Ensure the value is a number
-        if value >= 1000:
-            return f"{value / 1000:.1f}K ({int(value)})"
-        return str(int(value))
-    except (ValueError, TypeError):
-        return str(value)
+    if value >= 1000:
+        return f"{value/1000:.1f}K ({value})"
+    return str(value)
 
-def send_slack_message(channel, thread_ts, blocks, text="Message from script"):
-    client = WebClient(token=SLACK_API_TOKEN)
-    try:
-        response = client.chat_postMessage(channel=channel, thread_ts=thread_ts, blocks=blocks, text=text)
-        return response["channel"], response["ts"]
-    except SlackApiError as e:
-        print(f"Error sending message to Slack: {e.response['error']}")
-        return None
+def stream_real_time_data(api_token, service_id, duration, wait_interval=DEFAULT_WAIT_INTERVAL):
+    print(f"Streaming real-time data for {duration} seconds with a wait interval of {wait_interval} seconds...")
+    print(f"To change the wait interval, just let me know the new interval in seconds and I'll adjust it for you.")
+    end_time = datetime.utcnow() + timedelta(seconds=duration)
+    total_stats = {field: 0 for field in COMMON_FIELDS}
 
-def update_slack_message(channel, ts, blocks, text="Updated message from script", thread_ts=None):
-    client = WebClient(token=SLACK_API_TOKEN)
-    try:
-        if thread_ts:
-            client.chat_update(channel=channel, ts=ts, thread_ts=thread_ts, blocks=blocks, text=text)
-        else:
-            client.chat_update(channel=channel, ts=ts, blocks=blocks, text=text)
-    except SlackApiError as e:
-        print(f"Error updating message on Slack: {e.response['error']}")
+    while datetime.utcnow() < end_time:
+        print(f"Waiting for {wait_interval} seconds...")
+        time.sleep(wait_interval)
+        stats_data = get_real_time_data(api_token, service_id, duration_seconds=wait_interval)
+        if not stats_data:
+            print("Unable to retrieve real-time data.")
+            return
 
-def delete_slack_message(channel, ts):
-    client = WebClient(token=SLACK_API_TOKEN)
-    try:
-        client.chat_delete(channel=channel, ts=ts)
-    except SlackApiError as e:
-        print(f"Error deleting message on Slack: {e.response['error']}")
+        interval_stats = {field: 0 for field in COMMON_FIELDS}
+        for data_point in stats_data:
+            for common_field in COMMON_FIELDS:
+                if common_field in data_point['aggregated']:
+                    interval_stats[common_field] += data_point['aggregated'][common_field]
+
+        for field in COMMON_FIELDS:
+            total_stats[field] += interval_stats[field]
+
+        print(f"\nReal-Time Data Summary (Last {wait_interval} seconds):")
+        for field, value in interval_stats.items():
+            print(f"{field}: {format_value(value)}")
+        print("\n---\n")
+
+    print("\nTotal Real-Time Data Summary:")
+    for field, value in total_stats.items():
+        print(f"{field}: {format_value(value)}")
+    print("\n---\n")
 
 def generate_dashboard_url(service_id, range_str, is_realtime=False):
     if is_realtime:
@@ -216,120 +214,7 @@ def generate_dashboard_url(service_id, range_str, is_realtime=False):
     else:
         return FASTLY_DASHBOARD_HISTORICAL_URL.format(service_id=service_id, range=range_str)
 
-def generate_slack_blocks(summary, interval_summary, service_name, environment, service_id, is_realtime, previous_interval_summary=None):
-    blocks = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": ":bar_chart: Real-Time Data Summary" if is_realtime else ":bar_chart: Historical Data Summary"
-            }
-        },
-        {
-            "type": "section",
-            "fields": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"*Service Name:*\n<{generate_dashboard_url(service_id, '1m', is_realtime)}|{service_name}>"
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": f"*Environment:*\n{environment.title()}"
-                }
-            ]
-        },
-        {"type": "divider"}
-    ]
-
-    for field, value in summary.items():
-        if not is_realtime:
-            blocks.append({
-                "type": "section",
-                "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*{field.replace('_', ' ').title()}*\n*Total:* `{format_value(value)}`"
-                    }
-                ]
-            })
-        else:
-            interval_value = interval_summary.get(field, 0)
-            previous_value = previous_interval_summary.get(field, 0) if previous_interval_summary else 0
-            change_emoji = ""
-            if interval_value > previous_value:
-                change_emoji = " :arrow_up:"
-            elif interval_value < previous_value:
-                change_emoji = " :arrow_down:"
-
-            blocks.append({
-                "type": "section",
-                "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*{field.replace('_', ' ').title()}*\n*Total:* `{format_value(value)}`\n*Last Interval:* `{format_value(interval_value)}` {change_emoji}"
-                    }
-                ]
-            })
-
-    if is_realtime:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "_You can stop the stream by clicking on the 'Stop' button on this thread._"
-            }
-        })
-
-    return blocks
-
-def stream_real_time_data(api_token, service_name, environment, service_id, duration, wait_interval=DEFAULT_WAIT_INTERVAL, slack_channel=None, thread_ts=None):
-    print(f"Streaming real-time data for {duration} seconds with a wait interval of {wait_interval} seconds...")
-    end_time = datetime.utcnow() + timedelta(seconds=duration)
-    total_stats = {field: 0 for field in COMMON_FIELDS}
-    previous_stats = {field: 0 for field in COMMON_FIELDS}
-
-    slack_ts = None
-    if slack_channel:
-        blocks = generate_slack_blocks(total_stats, {}, service_name, environment, service_id, is_realtime=True)
-        channel, slack_ts = send_slack_message(slack_channel, thread_ts, blocks)
-    
-    try:
-        while datetime.utcnow() < end_time:
-            time.sleep(wait_interval)
-            stats_data = get_real_time_data(api_token, service_id, duration_seconds=wait_interval)
-            if not stats_data:
-                print("Unable to retrieve real-time data.")
-                return
-
-            interval_stats = {field: 0 for field in COMMON_FIELDS}
-            for data_point in stats_data:
-                for common_field in COMMON_FIELDS:
-                    if common_field in data_point['aggregated']:
-                        interval_stats[common_field] += data_point['aggregated'][common_field]
-
-            for field in COMMON_FIELDS:
-                total_stats[field] += interval_stats[field]
-
-            if slack_channel:
-                blocks = generate_slack_blocks(total_stats, interval_stats, service_name, environment, service_id, is_realtime=True, previous_interval_summary=previous_stats)
-                update_slack_message(channel, slack_ts, blocks, thread_ts)
-                previous_stats = interval_stats.copy()
-            else:
-                print(f"\nReal-Time Data Summary (Last {wait_interval} seconds):")
-                for field, value in interval_stats.items():
-                    print(f"{field}: {format_value(value)}")
-                print("\n---\n")
-
-        if not slack_channel:
-            print("\nTotal Real-Time Data Summary:")
-            for field, value in total_stats.items():
-                print(f"{field}: {format_value(value)}")
-            print("\n---\n")
-    finally:
-        if slack_channel and slack_ts:
-            delete_slack_message(slack_channel, slack_ts)
-
-def main(environment=None, service_name=None, field_name=None, duration=None, realtime=False, stream_duration=DEFAULT_STREAM_DURATION, wait_interval=DEFAULT_WAIT_INTERVAL, slack_channel=None, thread_ts=None):
+def main(environment=None, service_name=None, field_name=None, duration=None, realtime=False, stream_duration=DEFAULT_STREAM_DURATION, wait_interval=DEFAULT_WAIT_INTERVAL):
     try:
         if not environment:
             print("No environment specified. Please provide one of the following environments:")
@@ -365,7 +250,7 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
         debug_print(f"Best matching service: {best_match}")
 
         if realtime:
-            stream_real_time_data(API_TOKEN, best_match, environment, service_id, stream_duration, wait_interval, slack_channel, thread_ts)
+            stream_real_time_data(API_TOKEN, service_id, stream_duration, wait_interval)
             print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, f'{stream_duration}s', is_realtime=True)}")
             return
 
@@ -383,38 +268,36 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
         stats_data = get_historical_data(API_TOKEN, service_id, start_time, end_time, by)
         if not stats_data:
             print(f"Unable to retrieve historical data for service '{best_match}', falling back to real-time data.")
-            stream_real_time_data(API_TOKEN, best_match, environment, service_id, stream_duration, wait_interval, slack_channel, thread_ts)
+            stream_real_time_data(API_TOKEN, service_id, stream_duration, wait_interval)
             print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, f'{stream_duration}s', is_realtime=True)}")
             return
 
-        summary = {}
-        channel = None
-        slack_ts = None
         if not field_name or field_name.lower() == "overview":
+            print(f"No specific field provided, showing overview for the last {duration}:")
             for common_field in COMMON_FIELDS:
                 values = [data.get(common_field, 0) for data in stats_data]
                 total_value = sum(values)
                 formatted_total_value = format_value(total_value)
-                summary[common_field] = formatted_total_value
-            blocks = generate_slack_blocks(summary, {}, best_match, environment, service_id, is_realtime=False)
-            debug_print(f"Generated Slack blocks for historical data: {blocks}")
-            if slack_channel:
-                channel, slack_ts = send_slack_message(slack_channel, thread_ts, blocks, text="Historical data overview")
-                debug_print(f"Slack message sent: channel={channel}, ts={slack_ts}")
-            else:
-                pprint(summary)
+                print(f"{common_field}: {formatted_total_value}")
             print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, range_str, is_realtime=False)}")
+            print("You can specify a specific field to get more detailed information.")
             return
 
+        debug_print("Performing fuzzy matching for field name...")
         matching_field, all_fields = get_matching_field(field_name, stats_data)
         if not matching_field:
             print(f"No matching field found for '{field_name}'")
             return
         
+        debug_print(f"Best matching field: {matching_field}")
+
         values = [data.get(matching_field, 0) for data in stats_data]
+
+        debug_print(f"Retrieved values for field '{matching_field}':")
+        debug_print(f"Gathered {len(values)} data points:\n\n{values}")
+
         total_value = sum(values)
         formatted_total_value = format_value(total_value)
-        summary[matching_field] = formatted_total_value
 
         print(f"Total value for the last {duration}: {formatted_total_value} (from field: {matching_field})")
 
@@ -500,7 +383,7 @@ if __name__ == "__main__":
             ENVIRONMENT = args[0]
             SERVICE_NAME = args[1]
             FIELD_NAME = args[2]
-            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, realtime=True, slack_channel=SLACK_CHANNEL_ID, thread_ts=SLACK_THREAD_TS)
+            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, realtime=True)
         except ValueError as e:
             print(f"An error occurred while parsing arguments: {e}")
         except Exception as e:
@@ -511,7 +394,7 @@ if __name__ == "__main__":
             SERVICE_NAME = args[1]
             FIELD_NAME = args[2]
             STREAM_DURATION = int(args[3])
-            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, realtime=True, stream_duration=STREAM_DURATION, slack_channel=SLACK_CHANNEL_ID, thread_ts=SLACK_THREAD_TS)
+            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, realtime=True, stream_duration=STREAM_DURATION)
         except ValueError as e:
             print(f"An error occurred while parsing arguments: {e}")
         except Exception as e:
@@ -523,7 +406,7 @@ if __name__ == "__main__":
             FIELD_NAME = args[2]
             STREAM_DURATION = int(args[3])
             WAIT_INTERVAL = int(args[5])
-            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, realtime=True, stream_duration=STREAM_DURATION, wait_interval=WAIT_INTERVAL, slack_channel=SLACK_CHANNEL_ID, thread_ts=SLACK_THREAD_TS)
+            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, realtime=True, stream_duration=STREAM_DURATION, wait_interval=WAIT_INTERVAL)
         except ValueError as e:
             print(f"An error occurred while parsing arguments: {e}")
         except Exception as e:
@@ -534,7 +417,7 @@ if __name__ == "__main__":
             SERVICE_NAME = args[1]
             FIELD_NAME = args[2]
             DURATION = args[3]
-            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, duration=DURATION, slack_channel=SLACK_CHANNEL_ID, thread_ts=SLACK_THREAD_TS)
+            main(ENVIRONMENT, SERVICE_NAME, FIELD_NAME, duration=DURATION)
         except ValueError as e:
             print(f"An error occurred while parsing arguments: {e}")
         except Exception as e:

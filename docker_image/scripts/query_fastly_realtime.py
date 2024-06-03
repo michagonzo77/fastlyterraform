@@ -184,22 +184,22 @@ def format_value(value):
     except (ValueError, TypeError):
         return str(value)
 
-def send_slack_message(channel, thread_ts, blocks, text="Message from script"):
+def send_slack_message(channel, thread_ts, blocks):
     client = WebClient(token=SLACK_API_TOKEN)
     try:
-        response = client.chat_postMessage(channel=channel, thread_ts=thread_ts, blocks=blocks, text=text)
+        response = client.chat_postMessage(channel=channel, thread_ts=thread_ts, blocks=blocks)
         return response["channel"], response["ts"]
     except SlackApiError as e:
         print(f"Error sending message to Slack: {e.response['error']}")
         return None
 
-def update_slack_message(channel, ts, blocks, text="Updated message from script", thread_ts=None):
+def update_slack_message(channel, ts, blocks, thread_ts=None):
     client = WebClient(token=SLACK_API_TOKEN)
     try:
         if thread_ts:
-            client.chat_update(channel=channel, ts=ts, thread_ts=thread_ts, blocks=blocks, text=text)
+            client.chat_update(channel=channel, ts=ts, thread_ts=thread_ts, blocks=blocks)
         else:
-            client.chat_update(channel=channel, ts=ts, blocks=blocks, text=text)
+            client.chat_update(channel=channel, ts=ts, blocks=blocks)
     except SlackApiError as e:
         print(f"Error updating message on Slack: {e.response['error']}")
 
@@ -216,7 +216,7 @@ def generate_dashboard_url(service_id, range_str, is_realtime=False):
     else:
         return FASTLY_DASHBOARD_HISTORICAL_URL.format(service_id=service_id, range=range_str)
 
-def generate_slack_blocks(summary, interval_summary, service_name, environment, service_id, is_realtime, previous_interval_summary=None):
+def generate_slack_blocks(summary, interval_summary, service_name, environment, service_id, is_realtime):
     blocks = [
         {
             "type": "header",
@@ -242,34 +242,22 @@ def generate_slack_blocks(summary, interval_summary, service_name, environment, 
     ]
 
     for field, value in summary.items():
-        if not is_realtime:
-            blocks.append({
-                "type": "section",
-                "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*{field.replace('_', ' ').title()}*\n*Total:* `{format_value(value)}`"
-                    }
-                ]
-            })
-        else:
-            interval_value = interval_summary.get(field, 0)
-            previous_value = previous_interval_summary.get(field, 0) if previous_interval_summary else 0
-            change_emoji = ""
-            if interval_value > previous_value:
-                change_emoji = " :arrow_up:"
-            elif interval_value < previous_value:
-                change_emoji = " :arrow_down:"
+        interval_value = interval_summary.get(field, 0)
+        change_emoji = ""
+        if interval_value > 0:
+            change_emoji = " :arrow_up:"
+        elif interval_value < 0:
+            change_emoji = " :arrow_down:"
 
-            blocks.append({
-                "type": "section",
-                "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*{field.replace('_', ' ').title()}*\n*Total:* `{format_value(value)}`\n*Last Interval:* `{format_value(interval_value)}` {change_emoji}"
-                    }
-                ]
-            })
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*{field.replace('_', ' ').title()}*\n*Total:* `{format_value(value)}`\n*Last Interval:* `{format_value(interval_value)}` {change_emoji}"
+                }
+            ]
+        })
 
     if is_realtime:
         blocks.append({
@@ -286,7 +274,7 @@ def stream_real_time_data(api_token, service_name, environment, service_id, dura
     print(f"Streaming real-time data for {duration} seconds with a wait interval of {wait_interval} seconds...")
     end_time = datetime.utcnow() + timedelta(seconds=duration)
     total_stats = {field: 0 for field in COMMON_FIELDS}
-    previous_stats = {field: 0 for field in COMMON_FIELDS}
+    previous_stats = None
 
     slack_ts = None
     if slack_channel:
@@ -311,9 +299,9 @@ def stream_real_time_data(api_token, service_name, environment, service_id, dura
                 total_stats[field] += interval_stats[field]
 
             if slack_channel:
-                blocks = generate_slack_blocks(total_stats, interval_stats, service_name, environment, service_id, is_realtime=True, previous_interval_summary=previous_stats)
+                blocks = generate_slack_blocks(total_stats, interval_stats, service_name, environment, service_id, is_realtime=True)
                 update_slack_message(channel, slack_ts, blocks, thread_ts)
-                previous_stats = interval_stats.copy()
+                previous_stats = total_stats.copy()
             else:
                 print(f"\nReal-Time Data Summary (Last {wait_interval} seconds):")
                 for field, value in interval_stats.items():
@@ -397,13 +385,10 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
                 formatted_total_value = format_value(total_value)
                 summary[common_field] = formatted_total_value
             blocks = generate_slack_blocks(summary, {}, best_match, environment, service_id, is_realtime=False)
-            debug_print(f"Generated Slack blocks for historical data: {blocks}")
             if slack_channel:
-                channel, slack_ts = send_slack_message(slack_channel, thread_ts, blocks, text="Historical data overview")
-                debug_print(f"Slack message sent: channel={channel}, ts={slack_ts}")
+                channel, slack_ts = send_slack_message(slack_channel, thread_ts, blocks)
             else:
                 pprint(summary)
-            print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, range_str, is_realtime=False)}")
             return
 
         matching_field, all_fields = get_matching_field(field_name, stats_data)
@@ -416,8 +401,6 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
         formatted_total_value = format_value(total_value)
         summary[matching_field] = formatted_total_value
 
-        print(f"Total value for the last {duration}: {formatted_total_value} (from field: {matching_field})")
-
         suggestions = [
             suggestion for suggestion in process.extract(field_name, all_fields, limit=3, scorer=fuzz.WRatio) 
             if suggestion[0] != matching_field.replace(' ', '_').replace('-', '_')
@@ -427,8 +410,12 @@ def main(environment=None, service_name=None, field_name=None, duration=None, re
             print("Other close fields you might want to query:")
             for suggestion, score in suggestions:
                 print(f"  - {suggestion.replace(' ', '_')}")
-        
-        print(f"View more details in the Fastly dashboard: {generate_dashboard_url(service_id, range_str, is_realtime=False)}")
+
+        blocks = generate_slack_blocks(summary, {}, best_match, environment, service_id, is_realtime=False)
+        if slack_channel:
+            send_slack_message(slack_channel, thread_ts, blocks)
+        else:
+            pprint(summary)
 
     except Exception as e:
         print(f"An error occurred: {e}")

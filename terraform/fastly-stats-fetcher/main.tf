@@ -42,7 +42,7 @@ EOT
   // Optional fields, String
   model = "azure/gpt-3.5-turbo" // If not provided, Defaults to "azure/gpt-4"
   // If not provided, Defaults to "ghcr.io/kubiyabot/kubiya-agent:stable"
-  image = "michaelkubiya/fastly-test:update"
+  image = "michaelkubiya/fastly:latest"
 
   // Optional Fields:
   // Arrays
@@ -55,6 +55,7 @@ EOT
   environment_variables = {
     DEBUG            = "1"
     LOG_LEVEL        = "INFO"
+    KUBIYA_AGENT_STREAMING_DISABLED        = "1"
   }
   starters = [
     {

@@ -17,7 +17,7 @@ resource "kubiya_agent" "agent" {
   name         = "Fastly Cache Purger" // String
   runner       = "dev-eks-sandbox"     // String
   description  = <<EOT
-Fastly Cache Purger is an intelligent agent specializing in Fastly purging tasks. It can easily purge cache for selected services by brand, platform or operation
+Fastly Cache Purger is an intelligent agent specializing in Fastly purging tasks. It can easily purge cache for selected services by brand, platform or operation. It can clear the cache of either dev, qa, or production yoga.
 EOT
   instructions = <<EOT
 As an intelligent agent named Fastly, you have the capability to interact with Fastly services efficiently using the provided script. Ensure you maintain clarity and confirm actions with the user before executing any commands.
@@ -33,21 +33,21 @@ The ONLY Options are:
    - `prod-yoga`
 
 2. Ask the user to select *brand*, *platform*, or *operations*.**
-   - If the user selects by *Brand*, list all options from the $FASTLY_BRANDS environment variable in a numbered list.
-   - If the user selects by *Platform*, list all options from the $FASTLY_PLATFORMS environment variable in a numbered list.
+   - If the user selects by *Brand*, list all options from the fetch (echo) the $FASTLY_BRANDS environment variable value and show them in a numbered list for the user to select.
+   - If the user selects by *Platform*, list all options from the fetch (echo) the $FASTLY_PLATFORMS environment variable value and show them in a numbered list for the user to select.
    - If the user selects by *Operation*, prompt the user to input the operation
 
 3. Ask the user for confirmation before executing the command
    - Example message: `Are you sure you want to purge the cache for the dev-yoga service for the key 'history'?`
 AFTER the user have confirmed - run the `fastly-cache-purge` command with the collected parameters.
-   - Example collected params: service=dev-yoga, 
+   - Example collected params: service=dev-yoga, key=history
    - Example command: `purge-fastly-cache dev-yoga history`
 ** You can accept partial names if you believe the user meant such service or operation **
 EOT
   // Optional fields, String
   model = "azure/gpt-3.5-turbo" // If not provided, Defaults to "azure/gpt-4"
   // If not provided, Defaults to "ghcr.io/kubiyabot/kubiya-agent:stable"
-  image = "michaelkubiya/fastly-test:update"
+  image = "michaelkubiya/fastly:latest"
 
   // Optional Fields:
   // Arrays
@@ -62,6 +62,7 @@ EOT
     LOG_LEVEL        = "INFO"
     FASTLY_BRANDS    = "aenetworks, aetv, biography, crimecentral, crimeandinvestigation, fyi, history, historyvault, historyvaultca, lifetime, lifetimemovies, lmc"
     FASTLY_PLATFORMS = "android, androidtv, appletv, firetv, ios, kepler, roku, tizen, tvos, vizio, web, webos, weblanding, xclass"
+    KUBIYA_AGENT_STREAMING_DISABLED        = "1"    
   }
   starters = [
     {

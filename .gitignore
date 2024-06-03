@@ -2,14 +2,15 @@
 *.tfstate
 *.tfstate.*
 
+# Ignore Terraform lock files
+*.tflock
+*.terraform.lock.hcl
+
 # Ignore Terraform crash log files
 crash.log
 
 # Ignore Terraform plan files
 *.tfplan
-
-# Ignore Terraform lock files
-*.tflock
 
 # Ignore override files
 override.tf
@@ -23,7 +24,7 @@ override.tf.json
 
 # Ignore all .tf files except main.tf
 *.tf
-!*/main.tf
+!**/main.tf
 
 # Ignore .tf.json files
 *.tf.json
