@@ -7,6 +7,10 @@ COPY /scripts/query_fastly.py /usr/local/bin/query-fastly
 RUN chmod +x /usr/local/bin/query-fastly
 
 # Copy script
+COPY /scripts/query_fastly_realtime.py /usr/local/bin/query-fastly-realtime
+RUN chmod +x /usr/local/bin/query-fastly-realtime
+
+# Copy script
 COPY /scripts/purge_fastly_cache.sh /usr/local/bin/purge-fastly-cache
 RUN chmod +x /usr/local/bin/purge-fastly-cache
 

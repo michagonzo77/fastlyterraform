@@ -23,7 +23,7 @@ FUZZY_MATCH_THRESHOLD = 80  # Adjust this threshold based on how strict you want
 REAL_TIME_BASE_URL = "https://rt.fastly.com"
 HISTORICAL_BASE_URL = "https://api.fastly.com"
 DEFAULT_STREAM_DURATION = 60  # Default streaming duration in seconds
-DEFAULT_WAIT_INTERVAL = 2  # Default wait interval for real-time streaming
+DEFAULT_WAIT_INTERVAL = 1  # Default wait interval for real-time streaming
 FASTLY_DASHBOARD_HISTORICAL_URL = "https://manage.fastly.com/observability/dashboard/system/overview/historic/{service_id}?range={range}&region=all"
 FASTLY_DASHBOARD_REALTIME_URL = "https://manage.fastly.com/observability/dashboard/system/overview/realtime/{service_id}?range={range}"
 
@@ -128,7 +128,7 @@ def get_historical_data(api_token, service_id, start_time=None, end_time=None, b
         return None
 
 def get_real_time_data(api_token, service_id, duration_seconds=5):
-    url = f"{REAL_TIME_BASE_URL}/v1/channel/{service_id}/ts/h?limit={duration_seconds}"
+    url = f"{REAL_TIME_BASE_URL}/v1/channel/{service_id}/ts/0"
     debug_print(f"Real-Time API URL: {url}")
     headers = {
         "Fastly-Key": api_token,
@@ -248,7 +248,7 @@ def generate_slack_blocks(summary, interval_summary, service_name, environment, 
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": f"*{field.replace('_', ' ').title()}*\n*Total:* `{format_value(value)}`"
+                        "text": f"*{field.replace('_', ' ').title()}*"
                     }
                 ]
             })
@@ -259,14 +259,14 @@ def generate_slack_blocks(summary, interval_summary, service_name, environment, 
             if interval_value > previous_value:
                 change_emoji = " :arrow_up:"
             elif interval_value < previous_value:
-                change_emoji = " :arrow_down:"
+                change_emoji = " :small_red_triangle_down:"
 
             blocks.append({
                 "type": "section",
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": f"*{field.replace('_', ' ').title()}*\n*Total:* `{format_value(value)}`\n*Last Interval:* `{format_value(interval_value)}` {change_emoji}"
+                        "text": f"*{field.replace('_', ' ').title()}*\n*Last Interval:* `{format_value(interval_value)}` {change_emoji}"
                     }
                 ]
             })
@@ -278,6 +278,45 @@ def generate_slack_blocks(summary, interval_summary, service_name, environment, 
                 "type": "mrkdwn",
                 "text": "_You can stop the stream by clicking on the 'Stop' button on this thread._"
             }
+        })
+
+    return blocks
+
+def generate_final_slack_blocks_with_intervals(summary, interval_summary, service_name, environment, service_id):
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": ":bar_chart: Final Real-Time Data Summary"
+            }
+        },
+        {
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Service Name:*\n<{generate_dashboard_url(service_id, '1m', is_realtime=True)}|{service_name}>"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Environment:*\n{environment.title()}"
+                }
+            ]
+        },
+        {"type": "divider"}
+    ]
+
+    for field, value in summary.items():
+        interval_value = interval_summary.get(field, 0)
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*{field.replace('_', ' ').title()}*\n*Last Interval:* `{format_value(interval_value)}`"
+                }
+            ]
         })
 
     return blocks
@@ -327,7 +366,8 @@ def stream_real_time_data(api_token, service_name, environment, service_id, dura
             print("\n---\n")
     finally:
         if slack_channel and slack_ts:
-            delete_slack_message(slack_channel, slack_ts)
+            final_blocks = generate_final_slack_blocks_with_intervals(total_stats, previous_stats, service_name, environment, service_id)
+            update_slack_message(slack_channel, slack_ts, final_blocks)
 
 def main(environment=None, service_name=None, field_name=None, duration=None, realtime=False, stream_duration=DEFAULT_STREAM_DURATION, wait_interval=DEFAULT_WAIT_INTERVAL, slack_channel=None, thread_ts=None):
     try:

@@ -45,7 +45,7 @@ AFTER the user have confirmed - run the `fastly-cache-purge` command with the co
 ** You can accept partial names if you believe the user meant such service or operation **
 EOT
   // Optional fields, String
-  model = "azure/gpt-3.5-turbo" // If not provided, Defaults to "azure/gpt-4"
+  model = "azure/gpt-4o" // If not provided, Defaults to "azure/gpt-4"
   // If not provided, Defaults to "ghcr.io/kubiyabot/kubiya-agent:stable"
   image = "michaelkubiya/fastly:latest"
 
