@@ -235,6 +235,10 @@ def generate_slack_blocks(summary, interval_summary, service_name, environment, 
                 {
                     "type": "mrkdwn",
                     "text": f"*Environment:*\n{environment.title()}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Update Frequency:*\nEvery 1 second"
                 }
             ]
         },
@@ -301,6 +305,10 @@ def generate_final_slack_blocks_with_intervals(summary, interval_summary, servic
                 {
                     "type": "mrkdwn",
                     "text": f"*Environment:*\n{environment.title()}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Update Frequency:*\nEvery 1 second"
                 }
             ]
         },
